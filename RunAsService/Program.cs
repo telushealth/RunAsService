@@ -402,7 +402,7 @@ information visit RunAsService.com. Thank you.
 
         private static void InstallService(string path, string name, string displayName) { // This method installs and runs the service in the service control manager.
             #region Constants
-
+            const string CONST_Service_Depend = "Advantage";
             const int CONST_ScManager_CreateService = 0x0002; // SC_MANAGER_CREATE_SERVICE
             const int CONST_Win32OwnProcess = 0x00000010; // SERVICE_WIN32_OWN_PROCESS
             const int CONST_ErrorNormal = 0x00000001; // SERVICE_ERROR_NORMAL
@@ -441,8 +441,13 @@ information visit RunAsService.com. Thank you.
 
                 throw new Exception(GetLastError().ToString()); //Console.WriteLine("SCM not opened successfully");
             }
-            
-            var serviceHandle = CreateService(scManagerHandle, name, displayName, CONST_AllAccess, CONST_Win32OwnProcess, CONST_AutoStart, CONST_ErrorNormal, path, null, 0, null, null, null);
+
+            IntPtr serviceHandle;
+            if (displayName.ToUpper() == "CJE" || displayName.ToUpper() == "SCENTOR" || displayName.ToUpper() == "SWSA") {
+                serviceHandle = CreateService(scManagerHandle, name, displayName, CONST_AllAccess, CONST_Win32OwnProcess, CONST_AutoStart, CONST_ErrorNormal, path, null, 0, CONST_Service_Depend, null, null);
+            } else {
+                serviceHandle = CreateService(scManagerHandle, name, displayName, CONST_AllAccess, CONST_Win32OwnProcess, CONST_AutoStart, CONST_ErrorNormal, path, null, 0, null, null, null);
+            }
 
             if (serviceHandle.ToInt32() == 0) {
                 CloseServiceHandle(scManagerHandle);
@@ -520,12 +525,37 @@ information visit RunAsService.com. Thank you.
                 WindowStyle = ProcessWindowStyle.Hidden,
             };
 
-            process = Process.Start(oProcessStartInfo);
+            try
+            {
+                process = Process.Start(oProcessStartInfo);
+                process.EnableRaisingEvents = true;
+                process.Exited += new EventHandler(process_Exited);
+            }
+            catch (Exception ex)
+            {
+                //const string Path = @"C:\Telus\RunAsService.log";
+                //File.WriteAllText(Path, ex.Message);
+            }
         }
 
         protected override void OnStop() {
-            process.Kill();
+            if (process.HasExited == false)
+            {
+                process.Kill();
+            }
             process = null;
+        }
+
+        private void process_Exited(object sender, System.EventArgs e)
+        {
+            //const string Path = @"C:\Telus\RunAsService.log";
+            //File.WriteAllText(Path, "Fin du process");
+            this.ExitCode = 1;
+            this.Stop();
+            Console.WriteLine(
+                $"Exit time    : {process.ExitTime}\n" +
+                $"Exit code    : {process.ExitCode}\n" +
+                $"Elapsed time : {Math.Round((process.ExitTime - process.StartTime).TotalMilliseconds)}");
         }
     }
 }
