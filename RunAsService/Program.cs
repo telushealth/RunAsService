@@ -7,6 +7,7 @@ using System.IO;
 using System.Reflection;
 using System.Diagnostics;
 using System.ServiceProcess;
+using System.Linq;
 
 namespace RunAsService {
     class RunAsService { 
@@ -256,7 +257,7 @@ namespace RunAsService {
                     break;
                     #endregion
                 default:
-                    if(args.Length != 0) {
+                    if (args.Length != 0) {
                         Console.WriteLine("There appears to be something wrong with the parameters you specified.");
                         Console.WriteLine();
                     }
@@ -373,8 +374,7 @@ Where ""My Service"" would be replaced with the name of your service.
 
 CREDITS
 
-This tool was created by Luis Perez on April 2011. For more 
-information visit RunAsService.com. Thank you.
+This tool was created by Frédéric Paillé on August 2022. Thank you.
 ");
         }
 
@@ -434,7 +434,7 @@ information visit RunAsService.com. Thank you.
 
             var scManagerHandle = OpenSCManager(null, null, CONST_ScManager_CreateService);
 
-            if (scManagerHandle.ToInt32() == 0) {
+            if (scManagerHandle.ToInt64() == 0) {
                 var errorCode = GetLastError();
 
                 if (errorCode == 5) throw new Exception("Could not install service, you have to run this installer as an administrator"); // access denied
@@ -449,7 +449,7 @@ information visit RunAsService.com. Thank you.
                 serviceHandle = CreateService(scManagerHandle, name, displayName, CONST_AllAccess, CONST_Win32OwnProcess, CONST_AutoStart, CONST_ErrorNormal, path, null, 0, null, null, null);
             }
 
-            if (serviceHandle.ToInt32() == 0) {
+            if (serviceHandle.ToInt64() == 0) {
                 CloseServiceHandle(scManagerHandle);
                 throw new Exception();
             }
@@ -461,12 +461,12 @@ information visit RunAsService.com. Thank you.
             const int CONST_GenericWrite = 0x40000000;
             var scManagerHandle = OpenSCManager(null, null, CONST_GenericWrite);
 
-            if (scManagerHandle.ToInt32() == 0) throw new Exception();
+            if (scManagerHandle.ToInt64() == 0) throw new Exception();
 
             const int CONST_Delete = 0x10000;
 
             var serviceHandle = OpenService(scManagerHandle, name, CONST_Delete);
-            if (serviceHandle.ToInt32() == 0) {
+            if (serviceHandle.ToInt64() == 0) {
                 var errorCode = GetLastError();
                 const int CONST_ErrorServiceDoesNotExist = 1060;
                 if (errorCode == CONST_ErrorServiceDoesNotExist) throw new Exception("No service with that name exist.");
@@ -510,52 +510,101 @@ information visit RunAsService.com. Thank you.
     public partial class Service : ServiceBase {
         private Process process;
         private string consoleApplicationExecutablePath;
+        private string consoleApplicationExecutableName;
         private string[] arguments;
+        private string directory, program;
+        private readonly string[] sProcessWatch = new string[] { "CMaj.exe", "BDRepare.exe", "CCorrection.exe" };
+        private readonly string[] sProcessLst = new string[] { "CJE.exe", "SCentor.exe", "SWSA.exe", "SSyncEtags.exe" };
 
         public Service(string consoleApplicationExecutablePath, string[] arguments) {
             this.consoleApplicationExecutablePath = consoleApplicationExecutablePath;
+            this.consoleApplicationExecutableName = Path.GetFileName(consoleApplicationExecutablePath);
             this.arguments = arguments;
         }
 
         protected override void OnStart(string[] args) {
-            var oProcessStartInfo = new ProcessStartInfo(consoleApplicationExecutablePath, string.Join(" ", arguments)) {
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                ErrorDialog = false,
-                WindowStyle = ProcessWindowStyle.Hidden,
-            };
-
-            try
-            {
-                process = Process.Start(oProcessStartInfo);
-                process.EnableRaisingEvents = true;
-                process.Exited += new EventHandler(process_Exited);
-            }
-            catch (Exception ex)
-            {
-                //const string Path = @"C:\Telus\RunAsService.log";
-                //File.WriteAllText(Path, ex.Message);
-            }
+            ProcessStart();
         }
 
         protected override void OnStop() {
+            directory = Path.GetDirectoryName(consoleApplicationExecutablePath);
+            program = Path.GetFileNameWithoutExtension(consoleApplicationExecutablePath);
             if (process.HasExited == false)
             {
-                process.Kill();
+                process.EnableRaisingEvents = false;
+                if (File.Exists(directory + @"\SShtDwn.exe") == true) {
+                    this.RequestAdditionalTime(60000);
+                    Process.Start(directory + @"\SShtDwn.exe", program.ToUpper());
+                    if (process.WaitForExit(60000) == false)
+                    {
+                        process.Kill();
+                    }
+                } else
+                {
+                    process.Kill();
+                }
             }
             process = null;
         }
 
-        private void process_Exited(object sender, System.EventArgs e)
+        private void ProcessExited(object sender, System.EventArgs e)
         {
-            //const string Path = @"C:\Telus\RunAsService.log";
-            //File.WriteAllText(Path, "Fin du process");
-            this.ExitCode = 1;
-            this.Stop();
-            Console.WriteLine(
-                $"Exit time    : {process.ExitTime}\n" +
-                $"Exit code    : {process.ExitCode}\n" +
-                $"Elapsed time : {Math.Round((process.ExitTime - process.StartTime).TotalMilliseconds)}");
+            //const string Path = @"C:\Telus\RunAsService_ProcessExisted.log";
+            //File.WriteAllText(Path, "Exitcode : " + process.ExitCode.ToString());
+            System.Threading.Thread.Sleep(60000);
+            ProcessStart();
+            //Console.WriteLine(
+            //    $"Exit time    : {process.ExitTime}\n" +
+            //    $"Exit code    : {process.ExitCode}\n" +
+            //    $"Elapsed time : {Math.Round((process.ExitTime - process.StartTime).TotalMilliseconds)}");
+        }
+
+        private void ProcessStart()
+        {
+            if (sProcessLst.Any(consoleApplicationExecutableName.Contains))
+            {
+                foreach (String sWatch in sProcessWatch) {
+                    Process[] pWatch = Process.GetProcessesByName(sWatch);
+                    if (pWatch.Length > 0)
+                    {
+                        if (pWatch[0].WaitForExit(3600000) == false)
+                        {
+                            this.ExitCode = 1;
+                            Stop();
+                        }
+                        System.Threading.Thread.Sleep(60000);
+                    }
+                }
+            }
+            Process[] pFind = Process.GetProcessesByName(consoleApplicationExecutableName);
+            if (pFind.Length > 0)
+            {
+                process = pFind[0];
+                process.EnableRaisingEvents = true;
+                process.Exited += new EventHandler(ProcessExited);
+            }
+            else
+            {
+                var oProcessStartInfo = new ProcessStartInfo(consoleApplicationExecutablePath, string.Join(" ", arguments))
+                {
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    ErrorDialog = false,
+                    WindowStyle = ProcessWindowStyle.Hidden,
+                };
+
+                try
+                {
+                    process = Process.Start(oProcessStartInfo);
+                    process.EnableRaisingEvents = true;
+                    process.Exited += new EventHandler(ProcessExited);
+                }
+                catch (Exception ex)
+                {
+                    const string Path = @"C:\Telus\RunAsService_ProcessStart.log";
+                    File.WriteAllText(Path, ex.Message);
+                }
+            }
         }
     }
 }
